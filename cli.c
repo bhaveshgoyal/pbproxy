@@ -5,12 +5,12 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#define PORT 9999
+#define PORT 9090
 #define MAXLINE 1024
 
 int main(int argc, char **argv){
 	int sockfd, n;
-	char recvline[MAXLINE+1];
+	char sendline[MAXLINE+1], recvline[MAXLINE+1];
 	struct sockaddr_in servaddr;
 
 	if (argc != 2){
@@ -31,11 +31,15 @@ int main(int argc, char **argv){
 	if (connect(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0)
 			printf("connect error");
 
-	while ( (n = read(sockfd, recvline, MAXLINE)) > 0) {
-			recvline[n] = 0;        /* null terminate */
-			if (fputs(recvline, stdout) == EOF)
-					printf("fputs error");
-	}
+    while(fgets(sendline, MAXLINE, stdin) != NULL){
+        write(sockfd, sendline, strlen(sendline));
+
+        if (read(sockfd, recvline, MAXLINE) == 0)
+            printf("Server Terminated");
+        fputs(recvline, stdout);
+		memset(recvline, 0, sizeof(recvline));
+    }
+
 	if (n < 0)
 			printf("read error");
 
