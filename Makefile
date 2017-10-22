@@ -1,15 +1,15 @@
 CC = gcc
 
-all: cli srv
+all: cli proxy
 
 
-srv:
-	rm -rf ./server
-	${CC} -o server srv.c
+proxy:
+	rm -rf ./pbproxy
+	${CC} -o pbproxy pbproxy.c -lpthread
 
 cli:
 	rm -rf ./client
 	${CC} -o client cli.c
 
 clean:
-	rm -rv client server
+	rm -rv client pbproxy

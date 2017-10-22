@@ -4,16 +4,44 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #define MAXLINE 1024
 #define LISTENQ 1024
+int max(int a, int b){
+	return (a >= b) ? a : b;
+}
+struct thread_args{
+	int *fd;
+	int *lfd;
 
+};
+void *forw_handler(void *t_args){
+		struct thread_args *args = (struct thread_args*) t_args;
+		int forwfd = (*(args)->fd);
+		int lisfd = (*(args)->lfd);
+   //     int lisfd = *(int*)t_args;
+        char recvline[MAXLINE+1] = {0};
+		ssize_t n;
+//		fprintf(stdout, "Nigga\n");
+//		fflush(stdout);
+		while((n = read(lisfd, recvline, MAXLINE)) > 0){        
+				recvline[n] = '\0';
+				write(forwfd, recvline, strlen(recvline));
+		memset(recvline, 0, sizeof(recvline));	
+//		        fputs(recvline, stdout);
+        }
+//		fputs(recvline, stdout);
+  //      fflush(stdout);
+		//write(lisfd, recvline, strlen(recvline));
+//		close(lisfd);
+	return 0;
+}
 int main(int argc, char **argv){
 
 		struct sockaddr_in lisaddr, forwaddr;
 		int lisfd, forwfd, connfd;
 		char buf[MAXLINE + 1], opt, *key = NULL;
-		ssize_t n;
 		int lflag = 0, kflag = 0;
 		int lport = 0, idx = 0;
 		char *socket_meta[2];
@@ -45,7 +73,6 @@ int main(int argc, char **argv){
 		for(int i = optind; i < argc; i++){
 				socket_meta[idx++] = argv[i];
 		}
-		printf("%d %s %s %s", lport, key, socket_meta[0], socket_meta[1]);
 
 		if (socket_meta[1] == NULL || socket_meta[0] == NULL){
 				fprintf(stderr, "proxy requires ip:port to run on\n");
@@ -84,19 +111,117 @@ int main(int argc, char **argv){
 						exit(0);
 				}
 				if (connect(forwfd, (struct sockaddr *)&forwaddr, sizeof(forwaddr)) < 0){
+						fprintf(stderr, "Connection error to specified service %s %s\n", socket_meta[0], socket_meta[1]);
+						exit(0);
+				}
+				fd_set readfs;
+				int maxfd = max(lisfd, forwfd);
+				char recvline[MAXLINE+1] = {0};
+				while(1){
+					FD_ZERO(&readfs);
+					FD_SET(forwfd, &readfs);
+					FD_SET(lisfd, &readfs);
+					int status = select(maxfd+1, &readfs, NULL, NULL, NULL);
+					if (status < 0){
+							fprintf(stderr, "Invalid Socket [Reverse proxy]");
+							exit(0);
+					}
+					if (FD_ISSET(forwfd, &readfs)){
+//								if (read(forwfd, recvline, MAXLINE) == 0){
+//										fprintf(stderr, "Server connection closed..\n");
+//										break;
+//								}
+//								write(lisfd, recvline, strlen(recvline));
+  //                         //     fflush(stdout);
+    //                            memset(recvline, 0, sizeof(recvline));
+							pthread_t tid;
+							struct thread_args *args = (struct thread_args *)malloc(sizeof(struct thread_args));
+							args->lfd = &forwfd;
+							args->fd = &connfd;
+							if (pthread_create(&tid, NULL, forw_handler, (void*)args) < 0){
+									printf("Could Not Create time service thread");
+									continue;
+							}
+							pthread_detach(tid);
+					}
+					else if (FD_ISSET(lisfd, &readfs)){
+							connfd = accept(lisfd, (struct sockaddr *)NULL, NULL);
+							pthread_t tid;
+							struct thread_args *args = (struct thread_args *)malloc(sizeof(struct thread_args));
+							args->lfd = &connfd;
+							args->fd = &forwfd;
+							if (pthread_create(&tid, NULL, forw_handler, (void*)args) < 0){
+									printf("Could Not Create time service thread");
+									continue;
+							}
+							pthread_detach(tid);
+            //                strcpy(buf, "hallo");
+			//				while((n = read(connfd, buf, MAXLINE)) > 0){        
+			//						buf[n] = '\0';
+			//						write(forwfd, buf, strlen(buf));
+			//				}
+//							close(connfd);
+					}
+				}
+				close(forwfd);
+				close(connfd);
+				close(lisfd);
+		}
+		else{	
+				if ((forwfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+						fprintf(stderr, "Error Creating Socket\n");
+						exit(0);
+				}
+
+				bzero(&(forwaddr), sizeof(forwaddr));
+
+				forwaddr.sin_family = AF_INET;
+				forwaddr.sin_port = htons((int)strtol(socket_meta[1], (char **)NULL, 10));
+
+				if (inet_pton(AF_INET, socket_meta[0], &forwaddr.sin_addr) < 0){
+						fprintf(stderr, "Could not translate IP %s\n", socket_meta[0]);
+						exit(0);
+				}
+				
+				if (connect(forwfd, (struct sockaddr *)&forwaddr, sizeof(forwaddr)) < 0){
 						fprintf(stderr, "Connection error to specified service %s %s", socket_meta[0], socket_meta[1]);
 						exit(0);
 				}
-				connfd = accept(lisfd, (struct sockaddr *) NULL, NULL);
-				char sendbuf[MAXLINE+1] = {0};
-				while((n = read(connfd, buf, MAXLINE)) > 0){        
-						buf[n] = '\0';
-						strcpy(sendbuf, buf);
-						write(forwfd, buf, strlen(sendbuf));
-						memset(sendbuf, 0, sizeof(sendbuf));
+
+				char sendline[MAXLINE+1] = {0}, recvline[MAXLINE+1] = {0};
+				fd_set readfs;
+				int maxfd = max(forwfd, STDIN_FILENO);
+				while(1){
+						FD_ZERO(&readfs);
+						FD_SET(forwfd, &readfs);
+						FD_SET(STDIN_FILENO, &readfs);
+						int status = select(maxfd+1, &readfs, NULL, NULL, NULL);
+						if (status < 0){
+								fprintf(stderr, "Invalid Select");
+								exit(0);
+						}
+						if (FD_ISSET(forwfd, &readfs)){
+								if (read(forwfd, recvline, MAXLINE) == 0){
+										fprintf(stderr, "Server connection closed..\n");
+										break;
+								}
+								fputs(recvline, stdout);
+								memset(recvline, 0, sizeof(recvline));
+						}
+						else if (FD_ISSET(STDIN_FILENO, &readfs)){
+								if (read(STDIN_FILENO, sendline, MAXLINE) == 0){
+										fprintf(stderr, "EOF encountered. Closing connection..\n");
+										shutdown(forwfd, SHUT_WR);
+										FD_CLR(STDIN_FILENO, &readfs);
+										continue;
+								}
+								else
+										write(forwfd, sendline, strlen(sendline));
+								memset(sendline, 0, sizeof(sendline));
+						}
 				}
-				close(connfd);
+				close(forwfd);
 		}
 
-    return 0;
+		return 0;
 }
