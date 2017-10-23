@@ -63,7 +63,7 @@ void *forw_handler(void *t_args){
 
                 if (!RAND_bytes(iv, 8)){
                     fprintf(stderr, "Counter not initialized\n");
-                    fflush(stdout);
+  //                  fflush(stdout);
                 }
                 memcpy(encout, iv, 8);
 
@@ -71,7 +71,7 @@ void *forw_handler(void *t_args){
                 AES_ctr128_encrypt((unsigned char *)recvline, (unsigned char *)transmission, len, &aes_key, state.ivec, state.ecount, &state.num);
                 memcpy(encout+8, transmission, strlen(transmission)+1);
                 
-				printf("Encrypting:  %s -> %s\n", recvline, encout);
+//				printf("Encrypting:  %s -> %s\n", recvline, encout);
                 
 				write(forwfd, encout, strlen(encout));
             }
@@ -79,12 +79,12 @@ void *forw_handler(void *t_args){
                 memcpy(iv, recvline, 8);
                 init_ctr(&state, iv);
                 AES_ctr128_encrypt((unsigned char *)recvline+8, (unsigned char *)transmission, len-8, &aes_key, state.ivec, state.ecount, &state.num);
-                printf("Decrypting:  %s -> %s\n", recvline, transmission);
+  //              printf("Decrypting:  %s -> %s\n", recvline, transmission);
                 
 				write(forwfd, transmission, strlen(transmission));
             }
 
-            fflush(stdout);
+//            fflush(stdout);
             memset(recvline, 0, sizeof(recvline));	
             memset(transmission, 0, sizeof(transmission));	
             memset(encout, 0, sizeof(encout));	
@@ -172,8 +172,8 @@ int main(int argc, char **argv){
 				bind(lisfd, (struct sockaddr *) &lisaddr, sizeof(lisaddr));
 				listen(lisfd, LISTENQ);
 
-				printf("Listening for connections on %d\n", lport);
-				fflush(stdout);
+//				printf("Listening for connections on %d\n", lport);
+//				fflush(stdout);
 
 				if ((forwfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
 						fprintf(stderr, "Error Creating Socket\n");
@@ -304,7 +304,7 @@ int main(int argc, char **argv){
 								else{
 										if (!RAND_bytes(iv, 8)){
 												fprintf(stderr, "Counter not initialized\n");
-												fflush(stdout);
+							//					fflush(stdout);
 										}
 										memcpy(transmission, iv, 8);
 
