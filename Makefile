@@ -5,7 +5,7 @@ all: cli proxy
 
 proxy:
 	rm -rf ./pbproxy
-	${CC} -o pbproxy pbproxy.c -lpthread
+	${CC} -o pbproxy pbproxy.c -lpthread -lcrypto
 
 cli:
 	rm -rf ./client
