@@ -97,8 +97,6 @@ void *forw_handler(void *t_args){
 }
 int main(int argc, char **argv){
 		
-//		EVP_CIPHER_CTX en, de;
-//		unsigned int salt[] = {12345, 54321};
 		int key_len;
 		struct sockaddr_in lisaddr, forwaddr;
 		int lisfd, forwfd, connfd;
@@ -194,11 +192,13 @@ int main(int argc, char **argv){
 						fprintf(stderr, "Connection error to specified service %s %s\n", socket_meta[0], socket_meta[1]);
 						exit(0);
 				}
-				fd_set readfs;
-				char recvline[MAXLINE+1] = {0};
-				connfd = accept(lisfd, (struct sockaddr *)NULL, NULL);
+
+                fd_set readfs;
+				
+                connfd = accept(lisfd, (struct sockaddr *)NULL, NULL);
 				int maxfd = max(connfd, forwfd);
-				while(1){
+				
+                while(1){
 					FD_ZERO(&readfs);
 					FD_SET(forwfd, &readfs);
 					FD_SET(connfd, &readfs);
