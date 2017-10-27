@@ -3,12 +3,13 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
-#define MAXLINE 1032 // 1024 + 8(IV)
+#define MAXLINE 4096 // 1024 + 8(IV)
 #define LISTENQ 1024
 int max(int a, int b){
 	return (a >= b) ? a : b;
@@ -19,8 +20,8 @@ struct ctr_state {
     unsigned char ecount[16];
 };
 struct thread_args{
-	int *fd;
-	int *lfd;
+	int fd;
+	int lfd;
 	int enc;
     unsigned char *key;
 };
@@ -34,63 +35,65 @@ void init_ctr(struct ctr_state *state, const unsigned char iv[8])
 
     memcpy(state->ivec, iv, 8);
 }
-
 void *forw_handler(void *t_args){
-		struct thread_args *args = (struct thread_args*) t_args;
-		int forwfd = (*(args)->fd);
-		int lisfd = (*(args)->lfd);
-		unsigned char *key = args->key;
+    struct thread_args *args = (struct thread_args*) t_args;
+    int forwfd = ((args)->fd);
+    int lisfd = ((args)->lfd);
+    unsigned char *key = args->key;
 
-		char recvline[MAXLINE+1] = {0};
-        char transmission[MAXLINE+1-8] = {0};
-        char encout[MAXLINE+1];
-		ssize_t n;
-		unsigned char iv[8];
-		struct ctr_state state;
+    char recvline[MAXLINE+1];
+    ssize_t n = 0;
+    unsigned char iv[8];
+    struct ctr_state state;
 
-		AES_KEY aes_key;
-	
-		if (AES_set_encrypt_key(key, 128, &aes_key) < 0){
-				fprintf(stderr, "Could not set key\n" );
-				exit(0);
-		}		
+    AES_KEY aes_key;
 
-		while((n = read(lisfd, recvline, MAXLINE)) > 0){        
-            recvline[n] = '\0';
-   
-   			int len = strlen(recvline)+1;
-            if (args->enc == 1){
+    if (AES_set_encrypt_key(key, 128, &aes_key) < 0){ 
+        fprintf(stderr, "Could not set key\n" );
+        exit(0);
+    }    
 
-                if (!RAND_bytes(iv, 8)){
-                    fprintf(stderr, "Counter not initialized\n");
-  //                  fflush(stdout);
-                }
-                memcpy(encout, iv, 8);
+    while((n = read(lisfd, recvline, MAXLINE)) > 0){    
 
-                init_ctr(&state, iv);
-                AES_ctr128_encrypt((unsigned char *)recvline, (unsigned char *)transmission, len, &aes_key, state.ivec, state.ecount, &state.num);
-                memcpy(encout+8, transmission, strlen(transmission)+1);
-                
-//				printf("Encrypting:  %s -> %s\n", recvline, encout);
-                
-				write(forwfd, encout, strlen(encout));
-            }
-            else{
-                memcpy(iv, recvline, 8);
-                init_ctr(&state, iv);
-                AES_ctr128_encrypt((unsigned char *)recvline+8, (unsigned char *)transmission, len-8, &aes_key, state.ivec, state.ecount, &state.num);
-  //              printf("Decrypting:  %s -> %s\n", recvline, transmission);
-                
-				write(forwfd, transmission, strlen(transmission));
-            }
+        int len = n;
+        if (args->enc == 1){ 
 
-//            fflush(stdout);
-            memset(recvline, 0, sizeof(recvline));	
-            memset(transmission, 0, sizeof(transmission));	
-            memset(encout, 0, sizeof(encout));	
-		}
-	free(t_args);
-	return 0;
+            if (!RAND_bytes(iv, 8)){
+                fprintf(stderr, "Counter not initialized\n");
+            }   
+
+            char encout[n+8];
+            memset(encout, 0, sizeof(encout));
+            memcpy(encout, iv, 8); 
+
+
+            char ciphertext[n];
+            memset(ciphertext, 0, sizeof(ciphertext));
+            init_ctr(&state, iv);
+            AES_ctr128_encrypt((unsigned char *)recvline, (unsigned char *)ciphertext, len, &aes_key, state.ivec, state.ecount, &state.num);
+            memcpy(encout+8, ciphertext, sizeof(ciphertext));
+
+
+            write(forwfd, encout, sizeof(encout));
+            memset(recvline, 0, sizeof(recvline));  
+        }   
+        else{
+            char transmission[n-8];
+            memset(transmission, 0, sizeof(transmission));
+            memcpy(iv, recvline, 8); 
+            init_ctr(&state, iv);
+            AES_ctr128_encrypt((unsigned char *)(recvline+8), (unsigned char *)transmission, len-8, &aes_key, state.ivec, state.ecount, &state.num);
+
+            write(forwfd, transmission, sizeof(transmission));
+        }   
+
+        memset(recvline, 0, sizeof(recvline));  
+    }   
+    pthread_exit(0);
+    close(lisfd);
+    close(forwfd);
+    free(t_args);
+    return 0;
 }
 int main(int argc, char **argv){
 		
@@ -104,6 +107,7 @@ int main(int argc, char **argv){
 		int lflag = 0, kflag = 0;
 		int lport = 0, idx = 0;
 		char *socket_meta[2];
+		ssize_t n = 0;
 
 		while((opt = getopt(argc, argv, "l:k:")) != -1){
 
@@ -130,7 +134,8 @@ int main(int argc, char **argv){
 								break;
 				}
 		}
-		for(int i = optind; i < argc; i++){
+		int i = 0;
+		for(i = optind; i < argc; i++){
 				socket_meta[idx++] = argv[i];
 		}
 
@@ -152,11 +157,7 @@ int main(int argc, char **argv){
 				fprintf(stderr, "Could not set key\n" );
 				exit(0);
 		}		
-/*		if (aes_init(key, key_len, (unsigned char *)&salt, &en, &de)) {
-				printf("Couldn't initialize AES cipher\n");
-				return -1;
-		}
-*/		
+		
 		if (lflag == 1){
 				if ((lisfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
 						fprintf(stderr, "Error Creating Socket\n");
@@ -194,12 +195,13 @@ int main(int argc, char **argv){
 						exit(0);
 				}
 				fd_set readfs;
-				int maxfd = max(lisfd, forwfd);
 				char recvline[MAXLINE+1] = {0};
+				connfd = accept(lisfd, (struct sockaddr *)NULL, NULL);
+				int maxfd = max(connfd, forwfd);
 				while(1){
 					FD_ZERO(&readfs);
 					FD_SET(forwfd, &readfs);
-					FD_SET(lisfd, &readfs);
+					FD_SET(connfd, &readfs);
 					int status = select(maxfd+1, &readfs, NULL, NULL, NULL);
 					if (status < 0){
 							fprintf(stderr, "Invalid Socket [Reverse proxy]");
@@ -209,8 +211,8 @@ int main(int argc, char **argv){
 
 							pthread_t tid;
 							struct thread_args *args = (struct thread_args *)malloc(sizeof(struct thread_args));
-							args->lfd = &forwfd;
-							args->fd = &connfd;
+							args->lfd = forwfd;
+							args->fd = connfd;
 							args->key = key;
 							args->enc = 1;
 							
@@ -221,12 +223,11 @@ int main(int argc, char **argv){
 							
 							pthread_detach(tid);
 					}
-					else if (FD_ISSET(lisfd, &readfs)){
-							connfd = accept(lisfd, (struct sockaddr *)NULL, NULL);
+					else if (FD_ISSET(connfd, &readfs)){
 							pthread_t tid;
 							struct thread_args *args = (struct thread_args *)malloc(sizeof(struct thread_args));
-							args->lfd = &connfd;
-							args->fd = &forwfd;
+							args->lfd = connfd;
+							args->fd = forwfd;
 							args->key = key;
 							args->enc = 0;
 							
@@ -264,11 +265,10 @@ int main(int argc, char **argv){
 				}
 
 				char sendline[MAXLINE+1] = {0}, recvline[MAXLINE+1] = {0};
-				char transmission[MAXLINE+1] = {0};
-				char plaintext[MAXLINE+1 - 8] = {0};
 
 				fd_set readfs;
 				int maxfd = max(forwfd, STDIN_FILENO);
+				
 				while(1){
 						FD_ZERO(&readfs);
 						FD_SET(forwfd, &readfs);
@@ -279,23 +279,25 @@ int main(int argc, char **argv){
 								exit(0);
 						}
 						if (FD_ISSET(forwfd, &readfs)){
-								if (read(forwfd, recvline, MAXLINE) == 0){
+								if ((n = read(forwfd, recvline, MAXLINE)) == 0){
 										fprintf(stderr, "Server connection closed..\n");
 										break;
 								}
 								memcpy(iv, recvline, 8);
+								
+								char plaintext[n-8];
 
+								memset(plaintext, 0, sizeof(plaintext));
 								init_ctr(&state, iv);
-								int len = strlen(recvline) + 1;
+								int len = n;
+								AES_ctr128_encrypt((unsigned char *)(recvline+8), (unsigned char *)plaintext, len-8, &aes_key, state.ivec, state.ecount, &state.num);
 								
-								AES_ctr128_encrypt((unsigned char *)recvline+8, (unsigned char *)plaintext, len-8, &aes_key, state.ivec, state.ecount, &state.num);
-								
-								fputs(plaintext, stdout);
+								write(STDOUT_FILENO, plaintext, sizeof(plaintext));
 								memset(recvline, 0, sizeof(recvline));
-								memset(recvline, 0, sizeof(plaintext));
-						}
+//
+}
 						else if (FD_ISSET(STDIN_FILENO, &readfs)){
-								if (read(STDIN_FILENO, sendline, MAXLINE) == 0){
+								if ((n = read(STDIN_FILENO, sendline, MAXLINE)) == 0){
 										fprintf(stderr, "EOF encountered. Closing connection..\n");
 										shutdown(forwfd, SHUT_WR);
 										FD_CLR(STDIN_FILENO, &readfs);
@@ -304,21 +306,24 @@ int main(int argc, char **argv){
 								else{
 										if (!RAND_bytes(iv, 8)){
 												fprintf(stderr, "Counter not initialized\n");
-							//					fflush(stdout);
-										}
+//
+}
+										char transmission[n+8];
+										
+										memset(transmission, 0, sizeof(transmission));
 										memcpy(transmission, iv, 8);
 
 										init_ctr(&state, iv);
 
-										unsigned char ciphertext[MAXLINE+1-8] = {0};
+										char ciphertext[n];
+										memset(ciphertext, 0, sizeof(ciphertext));
 										int len;
-										len = strlen(sendline)+1;
+										len = n;
 
 										AES_ctr128_encrypt((unsigned char *)sendline, (unsigned char *)ciphertext, len, &aes_key, state.ivec, state.ecount, &state.num);
 										memcpy(transmission+8, ciphertext, sizeof(ciphertext));
-										write(forwfd, transmission, strlen((const char *)transmission));
-										memset(sendline, 0, sizeof(transmission));
-								}
+										write(forwfd, transmission, sizeof(transmission));
+}
 
 								memset(sendline, 0, sizeof(sendline));
 						}
