@@ -101,7 +101,7 @@ int main(int argc, char **argv){
 		struct sockaddr_in lisaddr, forwaddr;
 		int lisfd, forwfd, connfd;
 		char opt;
-		unsigned char *key = NULL;
+		unsigned char key[1024] = {0}, *kfile = NULL;
 		int lflag = 0, kflag = 0;
 		int lport = 0, idx = 0;
 		char *socket_meta[2];
@@ -116,8 +116,8 @@ int main(int argc, char **argv){
 								break;
 						case 'k':
 								kflag = 1;
-								key = (unsigned char *)optarg;
-								key_len = strlen((const char *)key);
+								kfile = (unsigned char *)optarg;
+								key_len = strlen((const char *)kfile);
 								break;
 						case ':':
 								fprintf(stderr, "requires an argument");
@@ -141,11 +141,18 @@ int main(int argc, char **argv){
 				fprintf(stderr, "proxy requires ip:port to run on\n");
 				exit(0);
 		}
-		if (key == NULL){
+		if (kfile == NULL){
 				fprintf(stderr, "Missing key: Plugboard proxy requires a key argument for transmission..\n");
 				exit(0);
 
 		}
+		FILE *kfd = fopen((char *)kfile, "r");
+		printf("file: %s", kfile);
+		if (!fgets((char *)key, 1024, kfd)){
+			fprintf(stderr, "error: Couldn't read key from file.");
+			exit(0);
+		}
+
 		unsigned char iv[8];
 		struct ctr_state state;
 
