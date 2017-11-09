@@ -74,7 +74,7 @@ int forw_handler(void *t_args){
 						init_ctr(&state, iv);
 						AES_ctr128_encrypt(recvline, ciphertext, len, &aes_key, state.ivec, state.ecount, &state.num);
 						memcpy(encout+8, ciphertext, n);
-
+//						printf("CIPHER: SEND SIZEOF: %d\n", n);
 						write(forwfd, encout, n+8);
 						free(encout);
 						free(ciphertext);
@@ -295,7 +295,8 @@ int main(int argc, char **argv){
 												init_ctr(&state, iv);
 												int len = n;
 												AES_ctr128_encrypt((recvline+8), plaintext, len-8, &aes_key, state.ivec, state.ecount, &state.num);
-
+		//										fprintf(stderr, "RCV SIZEOF: %d\n", n);
+				//								fflush(stdout);
 												write(STDOUT_FILENO, plaintext, n-8);
 												memset(recvline, 0, BUF_SIZE);
 												free(plaintext);
